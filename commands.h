@@ -11,6 +11,7 @@ void my_touch(const char *);
 void my_rm(const char *);
 void my_cp(const char *, const char *);
 void my_mv(const char *, const char *);
+void my_clear();
 void help();
 
 /* GUI Integration Functions */

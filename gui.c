@@ -340,12 +340,48 @@ LRESULT CALLBACK OutputAreaProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         return 0;
     }
     
-    /* Prevent editing before prompt position */
-    if (uMsg == WM_KEYDOWN && (wParam == VK_BACK || wParam == VK_LEFT)) {
+    /* Prevent backspace from deleting prompt */
+    if (uMsg == WM_CHAR && wParam == VK_BACK) {
         int currentPos = LOWORD(SendMessage(hwnd, EM_GETSEL, 0, 0));
         if (currentPos <= g_promptEndPos) {
-            return 0;  /* Block deletion/movement into prompt area */
+            return 0;  /* Block backspace in prompt area */
         }
+    }
+    
+    /* Prevent Delete key from deleting prompt */
+    if (uMsg == WM_KEYDOWN && wParam == VK_DELETE) {
+        int startSel = LOWORD(SendMessage(hwnd, EM_GETSEL, 0, 0));
+        int endSel = HIWORD(SendMessage(hwnd, EM_GETSEL, 0, 0));
+        if (startSel < g_promptEndPos) {
+            return 0;  /* Block delete if selection includes prompt area */
+        }
+    }
+    
+    /* Prevent left arrow and Home from moving into prompt area */
+    if (uMsg == WM_KEYDOWN && (wParam == VK_LEFT || wParam == VK_HOME)) {
+        int currentPos = LOWORD(SendMessage(hwnd, EM_GETSEL, 0, 0));
+        if (wParam == VK_HOME || currentPos <= g_promptEndPos) {
+            /* Move cursor to start of user input (after prompt) */
+            SendMessage(hwnd, EM_SETSEL, g_promptEndPos, g_promptEndPos);
+            return 0;
+        }
+    }
+    
+    /* Prevent mouse clicks and text selection in prompt area */
+    if (uMsg == WM_LBUTTONDOWN || uMsg == WM_LBUTTONUP || uMsg == WM_MOUSEMOVE) {
+        /* Let the default handler process first */
+        LRESULT result = CallWindowProc(g_OriginalOutputProc, hwnd, uMsg, wParam, lParam);
+        
+        /* Then correct the cursor position if it's before the prompt */
+        int startSel = LOWORD(SendMessage(hwnd, EM_GETSEL, 0, 0));
+        int endSel = HIWORD(SendMessage(hwnd, EM_GETSEL, 0, 0));
+        
+        if (startSel < g_promptEndPos) {
+            SendMessage(hwnd, EM_SETSEL, g_promptEndPos, 
+                       (endSel < g_promptEndPos) ? g_promptEndPos : endSel);
+        }
+        
+        return result;
     }
     
     /* Call original window procedure */
@@ -402,6 +438,18 @@ void HandleRunCommand(HWND hwnd)
     /* Call backend command execution function */
     memset(output, 0, MAX_COMMAND_OUTPUT);
     execute_command(cmd, output);
+    
+    /* Check if output contains clear screen marker */
+    if (strstr(output, "::CLEAR_SCREEN::") != NULL) {
+        /* Clear the output area */
+        SetWindowText(hOutputArea, "");
+        g_promptEndPos = 0;
+        
+        /* Update prompt and show it */
+        UpdatePrompt();
+        ShowNewPrompt();
+        return;
+    }
     
     /* Display command output */
     if (strlen(output) > 0) {

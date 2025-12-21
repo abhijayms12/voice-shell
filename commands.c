@@ -238,6 +238,12 @@ void my_mv(const char *src, const char *dest) {
     }
 }
 
+// ===================== clear / cls =====================
+
+void my_clear() {
+    printf("::CLEAR_SCREEN::\r\n");
+}
+
 // ===================== help =====================
 
 void help() {
@@ -252,6 +258,7 @@ void help() {
     printf("  rm <file>           - Remove file\r\n");
     printf("  cp <src> <dest>     - Copy file\r\n");
     printf("  mv <src> <dest>     - Move/rename file\r\n");
+    printf("  clear / cls         - Clear the screen\r\n");
     printf("  help                - Show this help message\r\n");
     printf("  exit                - Close the application\r\n");
 }
@@ -327,6 +334,9 @@ void execute_command(const char *input, char *output) {
     }
     else if (strcmp(token, "mv") == 0) {
         my_mv(arg1, arg2);
+    }
+    else if (strcmp(token, "clear") == 0 || strcmp(token, "cls") == 0) {
+        my_clear();
     }
     else if (strcmp(token, "help") == 0) {
         help();
