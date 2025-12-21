@@ -5,7 +5,7 @@ CC = gcc
 CFLAGS = -Wall -Wextra -O2
 LDFLAGS = -mwindows -lgdi32
 TARGET = voice_shell.exe
-SOURCES = gui.c
+SOURCES = gui.c commands.c
 
 # Default target
 all: $(TARGET)
