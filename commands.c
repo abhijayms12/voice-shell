@@ -192,50 +192,97 @@ void my_rm(const char *filename) {
     }
 }
 
+// ===================== Helper Functions =====================
+
+static const char *basename_from_path(const char *path) {
+    const char *p = strrchr(path, '\\');
+    if (!p) p = strrchr(path, '/');
+    return p ? p + 1 : path;
+}
+
 // ===================== cp =====================
 
 void my_cp(const char *src, const char *dest) {
+    char target[MAX_PATH];
+    DWORD destAttr;
+
     if (!src || !dest) {
-        printf("Error: cp requires source and destination files\r\n");
+        printf("Error: cp requires source and destination\r\n");
         return;
     }
 
-    FILE *in = fopen(src, "rb");
-    if (!in) {
-        printf("Error: Cannot open source file '%s'\r\n", src);
+    /* Check source exists */
+    if (GetFileAttributesA(src) == INVALID_FILE_ATTRIBUTES) {
+        printf("Error: source file not found '%s'\r\n", src);
         return;
     }
 
-    FILE *out = fopen(dest, "wb");
-    if (!out) {
-        printf("Error: Cannot create destination file '%s'\r\n", dest);
-        fclose(in);
+    /* If dest is an existing directory, append basename(src) */
+    destAttr = GetFileAttributesA(dest);
+    if (destAttr != INVALID_FILE_ATTRIBUTES && (destAttr & FILE_ATTRIBUTE_DIRECTORY)) {
+        snprintf(target, sizeof(target), "%s\\%s", dest, basename_from_path(src));
+    } else {
+        /* dest treated as file path */
+        strncpy(target, dest, sizeof(target) - 1);
+        target[sizeof(target) - 1] = '\0';
+    }
+
+    /* Attempt copy (overwrite if exists) */
+    if (CopyFileA(src, target, FALSE)) {
+        printf("Copied '%s' -> '%s'\r\n", src, target);
         return;
     }
 
-    char buffer[8192];
-    size_t n;
-    while ((n = fread(buffer, 1, sizeof(buffer), in)) > 0)
-        fwrite(buffer, 1, n, out);
-
-    fclose(in);
-    fclose(out);
-    printf("Copied '%s' to '%s'\r\n", src, dest);
+    /* On failure, print error */
+    printf("Error: Cannot copy '%s' to '%s'\r\n", src, target);
 }
 
 // ===================== mv =====================
 
 void my_mv(const char *src, const char *dest) {
+    char target[MAX_PATH];
+    DWORD destAttr;
+
     if (!src || !dest) {
         printf("Error: mv requires source and destination\r\n");
         return;
     }
 
-    if (rename(src, dest) != 0) {
-        printf("Error: Cannot move/rename '%s' to '%s'\r\n", src, dest);
-    } else {
-        printf("Moved/renamed '%s' to '%s'\r\n", src, dest);
+    /* Check source exists */
+    if (GetFileAttributesA(src) == INVALID_FILE_ATTRIBUTES) {
+        printf("Error: source file not found '%s'\r\n", src);
+        return;
     }
+
+    /* If dest is an existing directory, append basename(src) */
+    destAttr = GetFileAttributesA(dest);
+    if (destAttr != INVALID_FILE_ATTRIBUTES && (destAttr & FILE_ATTRIBUTE_DIRECTORY)) {
+        snprintf(target, sizeof(target), "%s\\%s", dest, basename_from_path(src));
+    } else {
+        /* dest treated as file path */
+        strncpy(target, dest, sizeof(target) - 1);
+        target[sizeof(target) - 1] = '\0';
+    }
+
+    /* Try native move (works on same volume) */
+    if (MoveFileExA(src, target, MOVEFILE_REPLACE_EXISTING)) {
+        printf("Moved '%s' -> '%s'\r\n", src, target);
+        return;
+    }
+
+    /* If MoveFileExA failed, try copy+delete (works across volumes) */
+    if (CopyFileA(src, target, FALSE)) {
+        if (DeleteFileA(src)) {
+            printf("Moved '%s' -> '%s'\r\n", src, target);
+            return;
+        } else {
+            printf("Warning: copied to '%s' but failed to remove original '%s'\r\n", target, src);
+            return;
+        }
+    }
+
+    /* Final error */
+    printf("Error: Cannot move '%s' to '%s'\r\n", src, target);
 }
 
 // ===================== clear / cls =====================
