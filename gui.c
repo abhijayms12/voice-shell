@@ -9,6 +9,8 @@
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <direct.h>
 
 /* Declare DPI awareness function (for older MinGW) */
 typedef BOOL (WINAPI *SetProcessDPIAwareFunc)(void);
@@ -48,6 +50,15 @@ char g_currentPrompt[MAX_PROMPT_SIZE] = "C:\\> ";
 /* Track where user input starts (after prompt) */
 int g_promptEndPos = 0;
 
+/* Store application startup directory for voice script */
+char g_appDirectory[MAX_PATH] = "";
+
+/* Command history */
+#define MAX_HISTORY 50
+char g_commandHistory[MAX_HISTORY][MAX_INPUT_SIZE];
+int g_historyCount = 0;
+int g_historyIndex = -1;
+
 /* Forward declarations */
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK OutputAreaProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -78,6 +89,9 @@ void get_current_directory(char *buffer, int size);
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, 
                    LPSTR lpCmdLine, int nCmdShow)
 {
+    /* Save application startup directory */
+    _getcwd(g_appDirectory, MAX_PATH);
+    
     /* Enable DPI awareness to fix blurry text */
     HMODULE hUser32 = LoadLibrary("user32.dll");
     if (hUser32) {
@@ -357,6 +371,43 @@ LRESULT CALLBACK OutputAreaProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         }
     }
     
+    /* Handle up arrow - previous command from history */
+    if (uMsg == WM_KEYDOWN && wParam == VK_UP) {
+        if (g_historyCount > 0) {
+            if (g_historyIndex == -1) {
+                g_historyIndex = g_historyCount - 1;
+            } else if (g_historyIndex > 0) {
+                g_historyIndex--;
+            }
+            
+            /* Replace current input with history command */
+            int totalLength = GetWindowTextLength(hwnd);
+            SendMessage(hwnd, EM_SETSEL, g_promptEndPos, totalLength);
+            SendMessage(hwnd, EM_REPLACESEL, FALSE, (LPARAM)g_commandHistory[g_historyIndex]);
+        }
+        return 0;
+    }
+    
+    /* Handle down arrow - next command from history */
+    if (uMsg == WM_KEYDOWN && wParam == VK_DOWN) {
+        if (g_historyCount > 0 && g_historyIndex != -1) {
+            if (g_historyIndex < g_historyCount - 1) {
+                g_historyIndex++;
+                /* Replace current input with history command */
+                int totalLength = GetWindowTextLength(hwnd);
+                SendMessage(hwnd, EM_SETSEL, g_promptEndPos, totalLength);
+                SendMessage(hwnd, EM_REPLACESEL, FALSE, (LPARAM)g_commandHistory[g_historyIndex]);
+            } else {
+                /* Clear input when moving past last history entry */
+                g_historyIndex = -1;
+                int totalLength = GetWindowTextLength(hwnd);
+                SendMessage(hwnd, EM_SETSEL, g_promptEndPos, totalLength);
+                SendMessage(hwnd, EM_REPLACESEL, FALSE, (LPARAM)"");
+            }
+        }
+        return 0;
+    }
+    
     /* Prevent left arrow and Home from moving into prompt area */
     if (uMsg == WM_KEYDOWN && (wParam == VK_LEFT || wParam == VK_HOME)) {
         int currentPos = LOWORD(SendMessage(hwnd, EM_GETSEL, 0, 0));
@@ -435,6 +486,25 @@ void HandleRunCommand(HWND hwnd)
         return;
     }
     
+    /* Add command to history (avoid duplicates of last command) */
+    if (g_historyCount == 0 || strcmp(g_commandHistory[g_historyCount - 1], cmd) != 0) {
+        if (g_historyCount < MAX_HISTORY) {
+            strncpy(g_commandHistory[g_historyCount], cmd, MAX_INPUT_SIZE - 1);
+            g_commandHistory[g_historyCount][MAX_INPUT_SIZE - 1] = '\0';
+            g_historyCount++;
+        } else {
+            /* Shift history buffer and add new command */
+            for (int i = 0; i < MAX_HISTORY - 1; i++) {
+                strcpy(g_commandHistory[i], g_commandHistory[i + 1]);
+            }
+            strncpy(g_commandHistory[MAX_HISTORY - 1], cmd, MAX_INPUT_SIZE - 1);
+            g_commandHistory[MAX_HISTORY - 1][MAX_INPUT_SIZE - 1] = '\0';
+        }
+    }
+    
+    /* Reset history navigation index */
+    g_historyIndex = -1;
+    
     /* Call backend command execution function */
     memset(output, 0, MAX_COMMAND_OUTPUT);
     execute_command(cmd, output);
@@ -465,15 +535,100 @@ void HandleRunCommand(HWND hwnd)
 
 /*
  * Handle Mic button click
- * Placeholder for voice input functionality
+ * Executes Python voice script and processes the command
  */
 void HandleMicButton(HWND hwnd)
 {
-    /* TODO: Voice recognition integration
-     * This will be connected to Python Whisper backend
-     * For now, just show a placeholder message
-     */
-    AppendToOutput("[Voice input - awaiting backend integration]\r\n");
+    char commandBuffer[MAX_INPUT_SIZE];
+    char output[MAX_COMMAND_OUTPUT];
+    FILE *fp;
+    size_t len;
+    STARTUPINFO si;
+    PROCESS_INFORMATION pi;
+    char cmdLine[512];
+    
+    /* Setup process info to hide console window */
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    
+    /* Build command line with absolute paths */
+    char scriptPath[MAX_PATH];
+    char outputPath[MAX_PATH];
+    sprintf(scriptPath, "%s\\whisper_once.py", g_appDirectory);
+    sprintf(outputPath, "%s\\voice_command.txt", g_appDirectory);
+    sprintf(cmdLine, "cmd.exe /c python \"%s\" > \"%s\" 2>&1", scriptPath, outputPath);
+    
+    /* Execute Python script hidden */
+    if (!CreateProcess(NULL, cmdLine, NULL, NULL, FALSE, 
+                       CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        ShowNewPrompt();
+        return;
+    }
+    
+    /* Wait for process to complete */
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    
+    /* Open the output file using absolute path */
+    fp = fopen(outputPath, "r");
+    if (fp == NULL) {
+        ShowNewPrompt();
+        return;
+    }
+    
+    /* Read first line from file */
+    if (fgets(commandBuffer, MAX_INPUT_SIZE, fp) == NULL) {
+        fclose(fp);
+        ShowNewPrompt();
+        return;
+    }
+    fclose(fp);
+    
+    /* Trim newline characters */
+    len = strlen(commandBuffer);
+    while (len > 0 && (commandBuffer[len-1] == '\n' || commandBuffer[len-1] == '\r')) {
+        commandBuffer[len-1] = '\0';
+        len--;
+    }
+    
+    /* If command is empty, do nothing */
+    if (strlen(commandBuffer) == 0) {
+        ShowNewPrompt();
+        return;
+    }
+    
+    /* Display command with $ prefix */
+    AppendToOutput(commandBuffer);
+    AppendToOutput("\r\n");
+    
+    /* Call backend command execution function */
+    memset(output, 0, MAX_COMMAND_OUTPUT);
+    execute_command(commandBuffer, output);
+    
+    /* Check if output contains clear screen marker */
+    if (strstr(output, "::CLEAR_SCREEN::") != NULL) {
+        SetWindowText(hOutputArea, "");
+        char *realOutput = strstr(output, "::CLEAR_SCREEN::");
+        if (realOutput) {
+            realOutput += strlen("::CLEAR_SCREEN::");
+            if (strlen(realOutput) > 0) {
+                AppendToOutput(realOutput);
+            }
+        }
+    } else {
+        /* Display command output */
+        if (strlen(output) > 0) {
+            AppendToOutput(output);
+        }
+    }
+    
+    /* Update prompt with new directory */
+    UpdatePrompt();
+    
+    /* Show new prompt */
     ShowNewPrompt();
 }
 
@@ -518,6 +673,18 @@ void UpdatePrompt(void)
  */
 void ShowNewPrompt(void)
 {
+    /* Add newline before prompt if output doesn't already end with one */
+    int textLen = GetWindowTextLength(hOutputArea);
+    if (textLen > 0) {
+        char allText[MAX_OUTPUT_SIZE];
+        GetWindowText(hOutputArea, allText, MAX_OUTPUT_SIZE);
+        
+        /* Check if last characters are \r\n */
+        if (textLen < 2 || !(allText[textLen-2] == '\r' && allText[textLen-1] == '\n')) {
+            AppendToOutput("\r\n");
+        }
+    }
+    
     /* Append prompt to output area */
     AppendToOutput(g_currentPrompt);
     
