@@ -16,9 +16,8 @@ voice_command.txt
 
 .vscode/
 
-
+BACKEND_SUMMARY.md
 .DS_Store
 Thumbs.db
-
 
 *.log
