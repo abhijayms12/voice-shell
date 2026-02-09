@@ -332,6 +332,51 @@ static void builtin_clear(char *output) {
 }
 
 /* 
+ * Display current date 
+ */
+static void builtin_date(char *output) {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    
+    /* Format: Day, Month DD, YYYY */
+    const char *days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+    const char *months[] = {"", "January", "February", "March", "April", "May", "June", 
+                           "July", "August", "September", "October", "November", "December"};
+    
+    sprintf(output, "%s, %s %02d, %04d\r\n", 
+            days[st.wDayOfWeek], 
+            months[st.wMonth], 
+            st.wDay, 
+            st.wYear);
+}
+
+/* 
+ * Display current time 
+ */
+static void builtin_time(char *output) {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    
+    /* Format: HH:MM:SS AM/PM */
+    int hour12 = st.wHour % 12;
+    if (hour12 == 0) hour12 = 12;
+    const char *ampm = (st.wHour >= 12) ? "PM" : "AM";
+    
+    sprintf(output, "%02d:%02d:%02d %s\r\n", hour12, st.wMinute, st.wSecond, ampm);
+}
+
+/* 
+ * Echo text back to output 
+ */
+static void builtin_echo(const char *text, char *output) {
+    if (text && strlen(text) > 0) {
+        sprintf(output, "%s\r\n", text);
+    } else {
+        strcpy(output, "\r\n");
+    }
+}
+
+/* 
  * Display help information 
  */
 static void builtin_help(char *output) {
@@ -350,6 +395,9 @@ static void builtin_help(char *output) {
         "  rm <file>           - Remove file\r\n"
         "  cp <src> <dest>     - Copy file\r\n"
         "  mv <src> <dest>     - Move/rename file\r\n"
+        "  date                - Display current date\r\n"
+        "  time                - Display current time\r\n"
+        "  echo <text>         - Display text message\r\n"
         "  clear / cls         - Clear the screen\r\n"
         "  help                - Show this help message\r\n"
         "  exit                - Close the application\r\n\r\n"
@@ -357,7 +405,7 @@ static void builtin_help(char *output) {
         "  Any Windows command (ipconfig, ping, python, etc.)\r\n"
         "  Example: ipconfig /all\r\n"
         "  Example: python script.py\r\n"
-        "  Example: dir /b\r\n"
+        "  Example: netstat -an\r\n"
     );
 }
 
@@ -376,6 +424,24 @@ static void execute_external_command(const char *command, char *output) {
     char cmdLine[MAX_COMMAND_LEN];
     DWORD bytesRead;
     char buffer[4096];
+    
+    /* Check for problematic interactive commands that would hang */
+    char cmdCopy[256];
+    strncpy(cmdCopy, command, sizeof(cmdCopy) - 1);
+    cmdCopy[sizeof(cmdCopy) - 1] = '\0';
+    _strlwr(cmdCopy);
+    
+    /* List of commands that require user interaction and would hang */
+    const char *blocked[] = {"pause", "choice", "more", "edit", "debug", "fc /b", NULL};
+    for (int i = 0; blocked[i] != NULL; i++) {
+        if (strstr(cmdCopy, blocked[i]) == cmdCopy || 
+            (strstr(cmdCopy, blocked[i]) != NULL && 
+             *(strstr(cmdCopy, blocked[i]) - 1) == ' ')) {
+            sprintf(output, "Error: '%s' is an interactive command and cannot be used in this shell.\r\n", 
+                    blocked[i]);
+            return;
+        }
+    }
     
     /* Create pipe for output capture */
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -432,8 +498,14 @@ static void execute_external_command(const char *command, char *output) {
         }
     }
     
-    /* Wait for process to complete */
-    WaitForSingleObject(pi.hProcess, INFINITE);
+    /* Wait for process to complete (30 second timeout) */
+    DWORD waitResult = WaitForSingleObject(pi.hProcess, 30000);  /* 30 seconds */
+    
+    if (waitResult == WAIT_TIMEOUT) {
+        /* Command took too long - terminate it */
+        TerminateProcess(pi.hProcess, 1);
+        strcat(output, "\r\n[Command timed out after 30 seconds and was terminated]\r\n");
+    }
     
     /* Get exit code */
     DWORD exitCode;
@@ -445,7 +517,7 @@ static void execute_external_command(const char *command, char *output) {
     CloseHandle(pi.hThread);
     
     /* If no output and non-zero exit code, indicate error */
-    if (strlen(output) == 0 && exitCode != 0) {
+    if (strlen(output) == 0 && exitCode != 0 && waitResult != WAIT_TIMEOUT) {
         sprintf(output, "Command failed with exit code %lu\r\n", exitCode);
     }
 }
@@ -613,6 +685,18 @@ void execute_command(const char *input, char *output) {
     }
     else if (strcmp(cmdLower, "clear") == 0 || strcmp(cmdLower, "cls") == 0) {
         builtin_clear(output);
+    }
+    else if (strcmp(cmdLower, "date") == 0) {
+        builtin_date(output);
+    }
+    else if (strcmp(cmdLower, "time") == 0) {
+        builtin_time(output);
+    }
+    else if (strcmp(cmdLower, "echo") == 0) {
+        /* Get everything after "echo " */
+        const char *echoText = input + 5;  /* Skip "echo " */
+        while (*echoText == ' ') echoText++;  /* Skip leading spaces */
+        builtin_echo(echoText, output);
     }
     else if (strcmp(cmdLower, "help") == 0) {
         builtin_help(output);

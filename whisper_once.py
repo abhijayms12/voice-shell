@@ -2,13 +2,16 @@ import whisper
 import sounddevice as sd
 import numpy as np
 import warnings
+import os
 
+# Suppress warnings and download progress bars
 warnings.filterwarnings("ignore")
+os.environ['TQDM_DISABLE'] = '1'  # Disable progress bars
 
 SAMPLE_RATE = 16000
 DURATION = 5  # seconds
 
-# Load model (CPU-safe)
+# Load model (CPU-safe) - downloads once and caches
 model = whisper.load_model("base", device="cpu")
 
 # Record audio
@@ -169,6 +172,122 @@ elif "move" in spoken or "rename" in spoken:
             source = words[to_idx - 1]
             dest = words[to_idx + 1]
             command = f"mv {source} {dest}"
+
+# Date and Time commands
+elif "show date" in spoken or "what's the date" in spoken or "current date" in spoken or "today's date" in spoken:
+    command = "date"
+
+elif "date" in spoken and len(words) <= 2:
+    command = "date"
+
+elif "show time" in spoken or "what's the time" in spoken or "current time" in spoken or "what time" in spoken:
+    command = "time"
+
+elif "time" in spoken and len(words) <= 2 and "long" not in spoken:
+    command = "time"
+
+# Network commands
+elif "ip config" in spoken or "i p config" in spoken or "network config" in spoken or "show ip" in spoken or "ip address" in spoken:
+    if "all" in spoken:
+        command = "ipconfig /all"
+    else:
+        command = "ipconfig"
+
+elif "ping" in spoken:
+    words = spoken.split()
+    if "localhost" in spoken or "local host" in spoken:
+        command = "ping localhost"
+    elif "google" in spoken:
+        command = "ping google.com"
+    elif len(words) > 1:
+        # Try to extract target from the end
+        target = words[-1]
+        command = f"ping {target}"
+    else:
+        command = "ping localhost"
+
+elif "network stat" in spoken or "netstat" in spoken or "show connections" in spoken:
+    command = "netstat -an"
+
+elif "traceroute" in spoken or "trace route" in spoken:
+    words = spoken.split()
+    if "google" in spoken:
+        command = "tracert google.com"
+    elif len(words) > 1:
+        target = words[-1]
+        command = f"tracert {target}"
+
+# System information commands
+elif "who am i" in spoken or "whoami" in spoken or "current user" in spoken or "username" in spoken:
+    command = "whoami"
+
+elif "hostname" in spoken or "host name" in spoken or "computer name" in spoken:
+    command = "hostname"
+
+elif "system info" in spoken or "system information" in spoken:
+    command = "systeminfo"
+
+elif "task list" in spoken or "tasklist" in spoken or "show processes" in spoken or "running processes" in spoken:
+    command = "tasklist"
+
+elif "windows version" in spoken or "version" in spoken and "windows" in spoken:
+    command = "ver"
+
+# Echo command
+elif "echo" in spoken or "say" in spoken or "print" in spoken:
+    words = spoken.split()
+    if "echo" in words:
+        idx = words.index("echo")
+        text = " ".join(words[idx+1:]) if idx+1 < len(words) else ""
+        command = f"echo {text}"
+    elif "say" in words:
+        idx = words.index("say")
+        text = " ".join(words[idx+1:]) if idx+1 < len(words) else ""
+        command = f"echo {text}"
+    elif "print" in words:
+        idx = words.index("print")
+        text = " ".join(words[idx+1:]) if idx+1 < len(words) else ""
+        command = f"echo {text}"
+
+# Environment variables
+elif "show path" in spoken or "environment path" in spoken:
+    command = "echo %PATH%"
+
+elif "show env" in spoken or "environment variable" in spoken:
+    command = "set"
+
+# Directory listing (Windows dir command)
+elif "dir" in spoken and ("list" in spoken or "show" in spoken):
+    command = "dir"
+
+# Python commands
+elif "python version" in spoken or "check python" in spoken:
+    command = "python --version"
+
+elif "run python" in spoken or "execute python" in spoken:
+    words = spoken.split()
+    if "script" in words or "file" in words:
+        # Extract filename
+        for i, word in enumerate(words):
+            if word in ["script", "file"] and i + 1 < len(words):
+                filename = words[i + 1]
+                if not filename.endswith(".py"):
+                    filename += ".py"
+                command = f"python {filename}"
+                break
+
+# Git commands
+elif "git status" in spoken:
+    command = "git status"
+
+elif "git log" in spoken:
+    command = "git log"
+
+elif "git pull" in spoken:
+    command = "git pull"
+
+elif "git push" in spoken:
+    command = "git push"
 
 # Utility commands
 elif "clear screen" in spoken or "clear terminal" in spoken or "clear" in spoken:
