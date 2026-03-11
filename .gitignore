@@ -24,3 +24,12 @@ Thumbs.db
 
 EXAM_PREPARATION_TECHNICAL.md
 EXAM_PRESENTATION_GUIDE.md
+
+# Internal documentation (exam prep / teammate guides)
+ARCHITECTURE.md
+QUICKREF.md
+RUN_INSTRUCTIONS.md
+INTEGRATION_GUIDE.md
+
+# Test artifacts
+hello/
